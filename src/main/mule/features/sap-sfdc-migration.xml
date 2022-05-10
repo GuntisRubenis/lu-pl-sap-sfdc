@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:salesforce-composite="http://www.mulesoft.org/schema/mule/salesforce-composite" xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/salesforce-composite http://www.mulesoft.org/schema/mule/salesforce-composite/current/mule-salesforce-composite.xsd">
+	<salesforce-composite:composite-config name="Salesforce_Composite_Config" doc:name="Salesforce Composite Config" doc:id="695d33fd-9e1b-421c-863a-af80eb592bc7" >
+		<salesforce-composite:oauth-user-pass-connection consumerKey="${sfdc.auth.consumerkey}" consumerSecret="${sfdc.auth.consumersecret}" username="${sfdc.auth.username}" password="${sfdc.auth.password}" securityToken="${sfdc.auth.token}" />
+	</salesforce-composite:composite-config>
+	<sub-flow name="sap-sfdc-migration-subflow" doc:id="f898f2c1-7f1e-4509-a048-e1037c770c6e" >
+		<http:request method="GET" doc:name="Get ALL Business Partners from SAP System API" doc:id="94c4402d-895a-4650-b9de-82501e7e55a9" config-ref="HTTP_Request_configuration_SAP_System_API" path="/getAllBusinessPartners"/>
+		<set-variable value="#[payload]" doc:name="allBusinessPartners" doc:id="97a8a035-db78-481e-8949-acd9a3d31174" variableName="allBusinessPartners"/>
+		<http:request method="GET" doc:name="Get ALL Business Partner Addresses from SAP System API" doc:id="53bb1d04-807d-45e5-8719-79dc42927e25" path="/getAllBusinessPartnerAddresses" config-ref="HTTP_Request_configuration_SAP_System_API"/>
+		<set-variable value="#[payload]" doc:name="allBusinessPartnerAddresses" doc:id="b018eee4-a488-4f5a-b016-01b337f8d4de" variableName="allBusinessPartnerAddresses"/>
+		<ee:transform doc:name="sapCombinedData" doc:id="d240b27c-b2c8-410f-86ca-ff6c5632937a" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="sapCombinedData" ><![CDATA[%dw 2.0
+output application/json
+---
+vars.allBusinessPartners map (value, index) -> {
+	"Partner": value,
+	"Address": (vars.allBusinessPartnerAddresses filter (value1, index) -> (value.BusinessPartner == value1.BusinessPartner))[0]
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<http:request method="GET" doc:name="GET ALL Accounts from SFDC Sytem API" doc:id="6c798aaa-57f1-4ab4-ba70-92abb2c33830" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/getAllAccounts" />
+		<set-variable value="#[payload]" doc:name="sfdcAccounts" doc:id="2710f4e0-10ad-420a-b3b5-d1fc46a276a0" variableName="sfdcAccounts"/>
+		<flow-ref doc:name="migration-sub-flow" doc:id="de95c99f-3704-4cf1-bb3e-636892955c39" name="migration-sub-flow"/>
+	</sub-flow>
+	<flow name="migration-sub-flow" doc:id="5e2f9317-6e2f-4009-9cdc-a0b6c6c96891" >
+		<ee:transform doc:name="Set payload to sapCombinedData" doc:id="2280df08-76ed-4486-87be-4db969033c06" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+vars.sapCombinedData]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<batch:job jobName="migartion-batch-job" doc:id="bf189679-bbee-4d07-820e-267c1c893e55" >
+			<batch:process-records >
+				<batch:step name="Batch_Step" doc:id="65eb95bd-993d-4658-9ff9-f1ab6670ef11" >
+					<ee:transform doc:name="Filter SFDC Accounts" doc:id="b2724648-e1c4-472f-bc23-244c076cb273" >
+						<ee:message >
+						</ee:message>
+						<ee:variables >
+							<ee:set-variable variableName="sfdcAccount" ><![CDATA[%dw 2.0
+output application/json
+var account = vars.sfdcAccounts filter (item,index) -> item.Business_Partner_id__c == payload.Partner.BusinessPartner and item.isDeleted == "false"
+---
+if(!isEmpty(account)) account else null]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+					<choice doc:name="Choice" doc:id="0e91c1fc-6e1f-48a7-8c6b-9fec3ef783ae" >
+						<when expression="#[vars.sfdcAccount != null]">
+							<set-variable value="exsists" doc:name="status" doc:id="e6be6901-b9e2-4506-8bee-0b30b66dcdfc" variableName="status"/>
+							<ee:transform doc:name="Add ContactId to payload" doc:id="c16e9647-c7db-40b1-8493-e25776b6b788" >
+								<ee:message >
+									<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload ++ {"ContactId": vars.sfdcAccount.Conatcts[0].id}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</when>
+						<otherwise >
+							<set-variable value="new" doc:name="status" doc:id="c75b4a1c-1a45-44ba-a559-1cbae7e6fcf0" variableName="status"/>
+						</otherwise>
+					</choice>
+				</batch:step>
+				<batch:step name="Batch_Step1" doc:id="979a0cf6-4316-4e69-ad80-b01b054c167a" acceptExpression='#[if (vars.status == "new") true else false]'>
+					<batch:aggregator doc:name="Batch Aggregator" doc:id="8beaf5ae-4651-4864-a993-d7d8f8dd2da8" size="75" preserveMimeTypes="true">
+						<ee:transform doc:name="POST: Composite Graph Payload" doc:id="5d7d6393-d5d4-40e7-b15d-99a56bb51fce" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere" 
+---
+payload map (value, index) -> {
+	"graphId": index +1,
+	"compositeRequest": [
+		{
+			"url": "/services/data/v50.0/sobjects/Account",
+			"body": {
+			    "Business_Partner_id__c": payload[index].Partner.BusinessPartner,
+			    "Name": payload[index].Partner.PersonFullName,
+			    "Industry": if(!isEmpty(payload[index].Partner.Industry)) payload[index].Partner.Industry else "Other",
+			    "Type": if(!isEmpty(payload[index].Partner.BusinessPartnerType)) payload[index].Partner.BusinessPartnerType else "Other",
+			    "Country__c": payload[index].Partner.NameCountry,
+			    "Last_Name__c": payload[index].Partner.LastName,
+			    "DOB__c": payload[index].Partner.BirthDate,
+			    "Contact_Language__c": if(!isEmpty(payload[index].Partner.CorrespondenceLanguage)) payload[index].Partner.CorrespondenceLanguage else "English",
+			    "Blocked__c": payload[index].Partner.BusinessPartnerIsBlocked,
+			    "Language__c": payload[index].Partner.Language,
+			    "Supplier__c": payload[index].Partner.Supplier,
+			    "Identity_Number__c": payload[index].Partner.PersonNumber,
+			    "Gender__c": if(payload[index].Partner.IsNaturalPerson == "X") 
+			    					if (payload[index].Partner.IsMale == true) "Male" 
+			    					else if (payload[index].Partner.IsFemale == true) "Female" 
+			    					else "Unknown" 
+			    			else "Organization",
+			    "First_Name__c": payload[index].Partner.FirstName
+			},
+			"method": "POST",
+			"referenceId": "REF" ++ index ++ "account"
+		},
+		{
+			"url": "/services/data/v50.0/sobjects/Contact",
+			"body": {
+				"Street__c": payload[index].Address.StreetName,
+				"House_Number__c": payload[index].Address.HouseNumber,
+				"Business_Partner_id__c": payload[index].Address.HouseNumber,
+				"Postal_Code__c": payload[index].Address.BusinessPartner,
+				"Languages__c": payload[index].Address.Language,
+				"Time_Zone__c": payload[index].Address.AddressTimeZone,
+				"City__c": payload[index].Address.CityName,
+				"Country__c": payload[index].Address.Country,
+				"Business_Partner_Address_id__c": payload[index].Address.AddressID,
+				"LastName": payload[index].Address.FullName
+				},
+			("AccountID": "@{" ++ "REF" ++ index ++ "account" ++ ".id"),
+			"method": "POST",
+			"referenceId": "REF" ++ index ++ "contact"
+		}
+	]
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<salesforce-composite:execute-composite-graph doc:name="POST: DATA" doc:id="cb340847-28fe-4779-8896-2058d4fbfb79" config-ref="Salesforce_Composite_Config"/>
+					</batch:aggregator>
+				</batch:step>
+			</batch:process-records>
+		</batch:job>
+	</flow>
+</mule>

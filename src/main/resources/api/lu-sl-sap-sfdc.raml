@@ -1,0 +1,15 @@
+#%RAML 1.0
+title: lu-pl=sap-sfdc
+description: System API for SAP
+mediaType: [application/json]
+protocols: [HTTPS]
+version: v1
+securitySchemes:
+  ClientId_Enforcement_policy: !include securitySchemas/clientSecretEnforcement.raml
+securedBy: ClientId_Enforcement_policy
+/sapToSfdcMigration:
+  get:
+    displayName: Migrate Data from SAP to SFDC
+    responses:
+      200:
+        body:

@@ -1,0 +1,35 @@
+api:
+  name: "tap-application-template"
+  id: "1215395"
+  version: "v1"
+  
+https:
+  path: "/api/${api.version}/*"
+  host: "0.0.0.0"
+  timeout: "5000" 
+  port: "8082"
+  #port: "443"
+  private:
+    port: "8092"
+    
+sap:
+  protocol: "HTTPS"
+  host: "lu-sl-sap.us-e2.cloudhub.io"
+  port: "443"
+  basepath: "/api/v1"
+  auth:
+    username: "test"
+    password: "test"
+    
+sfdc:
+  protocol: "HTTPS"
+  host: "lu-sl-sfdc.us-e2.cloudhub.io"
+  port: "443"
+  basepath: "/api/v1"
+  auth:
+    username: "test"
+    password: "test"
+    consumerkey: "3MVG9t0sl2P.pByrhfQgu6CqCN5bBkTR8lkIhIsM03L2JOdB_._6hT2uZ6VZFSy16wfxOkmbjUpKN2tNmh2x0"
+    consumersecret: "63664ACE6CB5442C86ACCB2FD9701AD36A4EE667C3EA0093721DD4B810C8E3EE"
+    token: "cPfgSi4usy4xlWbSQT0pn9fWf"
+    initialtoken: "6Cel800D7Q000006GV8n8887Q000000DNAC8dDE4YxGMBTVfKZ1daQ36RsWkzcifJggxMEhIp2ECxwZDPz3gB01wF3YDnofHcJ75fOAx75y"
