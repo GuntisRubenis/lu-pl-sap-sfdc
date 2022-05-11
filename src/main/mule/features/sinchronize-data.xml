@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<flow name="sinchronize-dataFlow" doc:id="de5a888c-5f15-48be-a45a-e331998b28c8">
+		<http:listener doc:name="Listener" doc:id="91ef5c6d-b6d3-4a46-8567-562d04eae4de" config-ref="HTTP_Local" path="/sync"/>
+		<http:request method="GET" doc:name="GET: SFDC All Accounts" doc:id="fbb97d70-9888-4847-94e2-a58456b6fc8a" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/getAllAccounts" />
+		<ee:transform doc:name="sfdcAccounts" doc:id="3bff4315-55a9-47b4-ac01-563d4bf64cea" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="sfdcAccounts" ><![CDATA[%dw 2.0
+output application/json
+---
+payload filter (item, index) -> (item.IsDeleted == "false" and !isEmpty(item.integration__c))]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<http:request method="GET" doc:name="GET: SAP Busineess Partners" doc:id="b87ad724-6ff7-4e58-b090-e006b2bab9c3" config-ref="HTTP_Request_configuration_SAP_System_API" path="/getAllBusinessPartners" />
+		<set-variable value="#[payload]" doc:name="businessPartners" doc:id="daff9fdf-3574-4c44-b92e-ad16df9a5397" variableName="businessPartners" />
+		<flow-ref doc:name="filter-accounts-sub-flow" doc:id="95be4bbc-ec5d-47fd-9858-a8b60368f8dd" name="filter-accounts-sub-flow" />
+		<flow-ref doc:name="sap-sfdc-migration-subflow" doc:id="ae738dcd-0b6d-43cc-b35c-b912b188ba84" name="sap-sfdc-migration-subflow"/>
+	</flow>
+	<sub-flow name="filter-accounts-sub-flow" doc:id="029b2d6c-8a16-4a2a-af2d-e40b6dbdb98c" >
+		<foreach doc:name="For Each SFDC Account" doc:id="1015c9ab-3cbc-41ee-aed5-0b2442c77880" collection="vars.sfdcAccounts" >
+			<set-variable value="#[payload]" doc:name="account" doc:id="1a824cef-c9f9-4091-834b-2e3aa27bb162" variableName="account"/>
+			<ee:transform doc:name="filterResult" doc:id="ec5d4914-ba15-4c92-98dc-bfb645e983ea" >
+				<ee:message >
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="filterResult" ><![CDATA[%dw 2.0
+output application/json
+var businessPartner = if(!isEmpty(vars.businessPartners filter (item, index) -> (item.BusinessPartner == payload.Business_Partner_id__c))) true else false
+---
+if (businessPartner == true)
+"update"
+else 
+"new"
+]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<choice doc:name="Choice" doc:id="23e52d24-e0aa-4cda-9e35-de5d1e1ed72d" >
+				<when expression="#[!isEmpty(vars.account.Contacts[0].Id)]">
+					<http:request method="GET" doc:name="GET: Contact by Account Id" doc:id="a4efa212-a280-4b29-8409-94d8a877f3a7" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/getAllContacts">
+				<http:query-params><![CDATA[#[output application/java
+---
+{
+	"id" : vars.account.Contacts[0].Id
+}]]]></http:query-params>
+			</http:request>
+					<set-variable value="#[payload]" doc:name="contact" doc:id="7bab767a-4ac9-493d-b41f-4095d01670a8" variableName="contact" />
+				</when>
+			</choice>
+			<ee:transform doc:name="Mapp Account to Business Partner" doc:id="14c18b35-8179-4889-9bf3-f9be52929534">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  
+    "Industry": vars.account.Industry[0 to 1],
+    "IsSexUnknown": if(vars.account.Gender__c == "Male") false 
+    				else if(vars.account.Gender__c == "Female") false
+    				else true,
+    "LastName": vars.account.Last_Name__c,
+    "BusinessPartnerIsBlocked": if(vars.account.Blocked__c == "false") false else true,
+    "Supplier": vars.account.Supplier__c,
+    "PersonNumber": vars.account.Identity_Number__c replace "-" with "",
+    "IsFemale": if(vars.account.Gender__c == "Female") true else false,
+    "IsNaturalPerson": "X",
+    "FirstName": vars.account.First_Name__c,
+    "IsMale": if(vars.account.Gender__c == "Male") true else false
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+			<choice doc:name="Choice" doc:id="ef902f5b-e9d3-4580-ad52-39d412986a09" >
+				<when expression='#[vars.filterResult == "update"]'>
+					<http:request method="PATCH" doc:name="Update  Business Partner" doc:id="e059688a-51f7-444a-b489-60a704e498a0" config-ref="HTTP_Request_configuration_SAP_System_API" path="/updateBusinessPartner/{id}">
+						<http:uri-params ><![CDATA[#[output application/java
+---
+{
+	"id" : vars.account.Business_Partner_id__c
+}]]]></http:uri-params>
+					</http:request>
+					<logger level="INFO" doc:name="Logg Payload" doc:id="19c81952-8424-4d3b-afd9-aba6106c9654" message="#[payload]"/>
+					<choice doc:name="Choice" doc:id="f5ffc3b4-84a0-4f8f-94da-1b729b7b4efb" >
+						<when expression="#[!isEmpty(vars.contact[0].Business_Partner_id__c)]">
+							<ee:transform doc:name="Mapp Contact to Business Parner Address" doc:id="10808208-24e6-4520-b017-5c95968a6550" >
+								<ee:message >
+									<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{   
+     	"StreetName": vars.contact[0].Street__c default "",
+        "HouseNumber": vars.contact[0].House_Number__c default "",
+        "PostalCode": vars.contact[0].Postal_Code__c default "",
+        "CityName": vars.contact[0].City__c default "",
+        "FullName": vars.contact[0].LastName default "",
+        "Country": vars.contact[0].Country__c default "",
+        "BusinessPartner": vars.contact[0].Business_Partner_id__c
+  }]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<http:request method="PATCH" doc:name="PATCH Business Partner Address" doc:id="57e82d9c-b2b1-4e61-9c29-866151c60726" config-ref="HTTP_Request_configuration_SAP_System_API" path="/updateBusinessPartnerAddress/{id}">
+								<http:uri-params ><![CDATA[#[output application/java
+---
+{
+	"id" : vars.contact[0].Business_Partner_Address_id__c
+}]]]></http:uri-params>
+							</http:request>
+						</when>
+						<when expression="#[!isEmpty(vars.contact)]">
+							<ee:transform doc:name="Mapp Contact to Business Parner Address" doc:id="2dd889d5-ef0d-4300-9630-a9923f06a847">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{   
+     	"StreetName": vars.contact[0].Street__c default "",
+        "HouseNumber": vars.contact[0].House_Number__c default "",
+        "PostalCode": vars.contact[0].Postal_Code__c default "",
+        "CityName": vars.contact[0].City__c default "",
+        "FullName": vars.contact[0].LastName default "",
+        "Country": vars.contact[0].Country__c default "",
+        "BusinessPartner": vars.account.Business_Partner_id__c
+  }]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<http:request method="POST" doc:name="POST Create Business Partner Address" doc:id="d48d01df-55dd-40d7-abef-93380e3513dc" config-ref="HTTP_Request_configuration_SAP_System_API" path="/createBusinessPartnerAddress"/>
+							<ee:transform doc:name="Transform Message" doc:id="ab50968b-ea96-4245-86b0-77faa1abdfd3" >
+								<ee:message >
+									<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</when>
+						<otherwise>
+							<logger level="INFO" doc:name="Logger" doc:id="d700b52c-f6bd-4c8f-afbe-2975f502976e" message="No Address"/>
+						</otherwise>
+					</choice>
+				</when>
+				<when expression='vars.filterResult == "new"'>
+					<http:request method="POST" doc:name="Create Business Partner in SAP" doc:id="ff31c7b0-a58c-4442-9b4b-be8d461f5f52" config-ref="HTTP_Request_configuration_SAP_System_API" path="/createBusinessPartner" />
+					<ee:transform doc:name="Mapp SFDC Payload" doc:id="3f920b86-9ba5-441d-b8ec-f082688236ed">
+						<ee:message>
+							<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"Business_Partner_id__C": payload.BusinessPartner
+}]]></ee:set-payload>
+						</ee:message>
+						<ee:variables >
+							<ee:set-variable variableName="businessPartnerId" ><![CDATA[%dw 2.0
+output application/json
+---
+payload.BusinessPartner]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+					<http:request method="PATCH" doc:name="Update SFDC Account" doc:id="61004f08-3ff9-45b9-ad3d-d94760baa0a6" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/updateAccount/{id}">
+						<http:uri-params ><![CDATA[#[output application/java
+---
+{
+	"id" : vars.account.Id
+}]]]></http:uri-params>
+					</http:request>
+					<logger level="INFO" doc:name="Log Payload" doc:id="9cf1a1a9-5e7f-4892-bab5-37b6efd717c4" message="#[payload]" />
+					<choice doc:name="Choice" doc:id="e1e83c31-9547-4f49-8cc6-39fd915abf9a" >
+						<when expression="#[!isEmpty(vars.contact)]">
+							<ee:transform doc:name="Mapp Contact to Business Parner Address" doc:id="fd183481-1f98-4f8c-9579-5a81ff9a53c9">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{   
+     	"StreetName": vars.contact[0].Street__c default "",
+        "HouseNumber": vars.contact[0].House_Number__c default "",
+        "PostalCode": vars.contact[0].Postal_Code__c default "",
+        "CityName": vars.contact[0].City__c default "",
+        "FullName": vars.contact[0].LastName default "",
+        "Country": vars.contact[0].Country__c[0 to 1] default "",
+        "BusinessPartner": vars.businessPartnerId
+  }]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+							<choice doc:name="Choice" doc:id="067dce4c-1487-4a73-808e-2338588237bc" >
+								<when expression="!isEmpty(vars.contact)">
+									<http:request method="POST" doc:name="POST Create Business Partner Address" doc:id="b5308f4b-f134-4cd1-9fed-badf085acf69" config-ref="HTTP_Request_configuration_SAP_System_API" path="/createBusinessPartnerAddress" />
+									<ee:transform doc:name="Map SFDC Contact Payload" doc:id="26306982-2ab6-4740-88b9-8b7669dcc746">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"Business_Partner_Address_id__c": payload.AddressID,
+	"Business_Partner_id__c": payload.BusinessPartner
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+									<http:request method="PATCH" doc:name="Update SFDC Contact" doc:id="34a62a57-558f-41fd-837b-e8d9e64b226c" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/updateContact/{id}">
+								<http:uri-params><![CDATA[#[output application/java
+---
+{
+	"id" : vars.contact[0].Id
+}]]]></http:uri-params>
+							</http:request>
+								</when>
+							</choice>
+						</when>
+						<otherwise >
+							<logger level="INFO" doc:name="Logger" doc:id="68311ffe-6785-401f-8b4e-2c89a1ea90f2" message="No Address"/>
+						</otherwise>
+					</choice>
+				</when>
+				<otherwise>
+					<logger level="INFO" doc:name="Usles" doc:id="b08c273c-bc2a-448d-a5b6-003fc097b83c" message="Usles"/>
+				</otherwise>
+			</choice>
+		</foreach>
+	</sub-flow>
+</mule>

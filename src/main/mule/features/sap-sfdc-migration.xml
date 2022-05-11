@@ -8,7 +8,7 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
 http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
 http://www.mulesoft.org/schema/mule/salesforce-composite http://www.mulesoft.org/schema/mule/salesforce-composite/current/mule-salesforce-composite.xsd">
 	<salesforce-composite:composite-config name="Salesforce_Composite_Config" doc:name="Salesforce Composite Config" doc:id="695d33fd-9e1b-421c-863a-af80eb592bc7" >
-		<salesforce-composite:oauth-user-pass-connection consumerKey="${sfdc.auth.consumerkey}" consumerSecret="${sfdc.auth.consumersecret}" username="${sfdc.auth.username}" password="${sfdc.auth.password}" securityToken="${sfdc.auth.token}" />
+		<salesforce-composite:oauth-user-pass-connection consumerKey="${salesforce.consumerkey}" consumerSecret="${salesforce.consumersecret}" username="${salesforce.username}" password="${salesforce.password}" securityToken="${salesforce.token}" />
 	</salesforce-composite:composite-config>
 	<sub-flow name="sap-sfdc-migration-subflow" doc:id="f898f2c1-7f1e-4509-a048-e1037c770c6e" >
 		<http:request method="GET" doc:name="Get ALL Business Partners from SAP System API" doc:id="94c4402d-895a-4650-b9de-82501e7e55a9" config-ref="HTTP_Request_configuration_SAP_System_API" path="/getAllBusinessPartners"/>
@@ -50,7 +50,7 @@ vars.sapCombinedData]]></ee:set-payload>
 						<ee:variables >
 							<ee:set-variable variableName="sfdcAccount" ><![CDATA[%dw 2.0
 output application/json
-var account = vars.sfdcAccounts filter (item,index) -> item.Business_Partner_id__c == payload.Partner.BusinessPartner and item.isDeleted == "false"
+var account = vars.sfdcAccounts filter (item,index) -> item.Business_Partner_id__c == payload.Partner.BusinessPartner and item.IsDeleted == "false"
 ---
 if(!isEmpty(account)) account else null]]></ee:set-variable>
 						</ee:variables>
@@ -63,9 +63,10 @@ if(!isEmpty(account)) account else null]]></ee:set-variable>
 									<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 ---
-payload ++ {"ContactId": vars.sfdcAccount.Conatcts[0].id}]]></ee:set-payload>
+payload ++ {"ContactId": vars.sfdcAccount[0].Contacts[0].Id}]]></ee:set-payload>
 								</ee:message>
 							</ee:transform>
+							<logger level="INFO" doc:name="Logger" doc:id="5c06147b-c9c9-43c0-b150-01af2ec911f2" />
 						</when>
 						<otherwise >
 							<set-variable value="new" doc:name="status" doc:id="c75b4a1c-1a45-44ba-a559-1cbae7e6fcf0" variableName="status"/>
@@ -73,7 +74,7 @@ payload ++ {"ContactId": vars.sfdcAccount.Conatcts[0].id}]]></ee:set-payload>
 					</choice>
 				</batch:step>
 				<batch:step name="Batch_Step1" doc:id="979a0cf6-4316-4e69-ad80-b01b054c167a" acceptExpression='#[if (vars.status == "new") true else false]'>
-					<batch:aggregator doc:name="Batch Aggregator" doc:id="8beaf5ae-4651-4864-a993-d7d8f8dd2da8" size="75" preserveMimeTypes="true">
+					<batch:aggregator doc:name="Batch Aggregator POST" doc:id="8beaf5ae-4651-4864-a993-d7d8f8dd2da8" size="75" preserveMimeTypes="true">
 						<ee:transform doc:name="POST: Composite Graph Payload" doc:id="5d7d6393-d5d4-40e7-b15d-99a56bb51fce" >
 							<ee:message >
 								<ee:set-payload ><![CDATA[%dw 2.0
@@ -86,15 +87,20 @@ payload map (value, index) -> {
 			"url": "/services/data/v50.0/sobjects/Account",
 			"body": {
 			    "Business_Partner_id__c": payload[index].Partner.BusinessPartner,
-			    "Name": payload[index].Partner.PersonFullName,
-			    "Industry": if(!isEmpty(payload[index].Partner.Industry)) payload[index].Partner.Industry else "Other",
-			    "Type": if(!isEmpty(payload[index].Partner.BusinessPartnerType)) payload[index].Partner.BusinessPartnerType else "Other",
-			    "Country__c": payload[index].Partner.NameCountry,
+			    "Name": if(!isEmpty(payload[index].Partner.FirstName) and !isEmpty(payload[index].Partner.LastName)) payload[index].Partner.FirstName ++ " " ++ payload[index].Partner.LastName else "Unknown",
+			    "Industry": if(payload[index].Partner.Industry == "Ba") "Banking"
+			     			else if (payload[index].Partner.Industry == "En") "Energy"
+			     			else if (payload[index].Partner.Industry == "Fi") "Finance"
+			     			else if (payload[index].Partner.Industry == "He") "Healthcare"
+			     			else if (payload[index].Partner.Industry == "Re") "Retail"
+			     			else "Other",
+			    //"Type": if(!isEmpty(payload[index].Partner.BusinessPartnerType)) payload[index].Partner.BusinessPartnerType else "Other",
+			    //"Country__c": payload[index].Partner.NameCountry,
 			    "Last_Name__c": payload[index].Partner.LastName,
-			    "DOB__c": payload[index].Partner.BirthDate,
-			    "Contact_Language__c": if(!isEmpty(payload[index].Partner.CorrespondenceLanguage)) payload[index].Partner.CorrespondenceLanguage else "English",
+			    //"DOB__c": payload[index].Partner.BirthDate,
+			    //"Contact_Language__c": if(!isEmpty(payload[index].Partner.CorrespondenceLanguage)) payload[index].Partner.CorrespondenceLanguage else "English",
 			    "Blocked__c": payload[index].Partner.BusinessPartnerIsBlocked,
-			    "Language__c": payload[index].Partner.Language,
+			    //"Language__c": payload[index].Partner.Language,
 			    "Supplier__c": payload[index].Partner.Supplier,
 			    "Identity_Number__c": payload[index].Partner.PersonNumber,
 			    "Gender__c": if(payload[index].Partner.IsNaturalPerson == "X") 
@@ -102,26 +108,29 @@ payload map (value, index) -> {
 			    					else if (payload[index].Partner.IsFemale == true) "Female" 
 			    					else "Unknown" 
 			    			else "Organization",
-			    "First_Name__c": payload[index].Partner.FirstName
+			    "First_Name__c": payload[index].Partner.FirstName,
+			    "integration__C": "yes"
 			},
 			"method": "POST",
 			"referenceId": "REF" ++ index ++ "account"
 		},
+		
 		{
 			"url": "/services/data/v50.0/sobjects/Contact",
 			"body": {
 				"Street__c": payload[index].Address.StreetName,
 				"House_Number__c": payload[index].Address.HouseNumber,
-				"Business_Partner_id__c": payload[index].Address.HouseNumber,
-				"Postal_Code__c": payload[index].Address.BusinessPartner,
-				"Languages__c": payload[index].Address.Language,
-				"Time_Zone__c": payload[index].Address.AddressTimeZone,
+				"Business_Partner_id__c": payload[index].Address.BusinessPartner,
+				"Postal_Code__c": payload[index].Address.PostalCode,
+				//"Languages__c": payload[index].Address.Language,
+				//"Time_Zone__c": payload[index].Address.AddressTimeZone,
 				"City__c": payload[index].Address.CityName,
 				"Country__c": payload[index].Address.Country,
 				"Business_Partner_Address_id__c": payload[index].Address.AddressID,
-				"LastName": payload[index].Address.FullName
-				},
-			("AccountID": "@{" ++ "REF" ++ index ++ "account" ++ ".id"),
+				"LastName": if(!isEmpty(payload[index].Partner.FirstName) and !isEmpty(payload[index].Partner.LastName)) payload[index].Partner.FirstName ++ " " ++ payload[index].Partner.LastName else "Unknown"
+				//"integration__C": "yes"
+				} ++
+			("AccountID": "@{" ++ "REF" ++ index ++ "account" ++ ".id}"),
 			"method": "POST",
 			"referenceId": "REF" ++ index ++ "contact"
 		}
@@ -130,6 +139,112 @@ payload map (value, index) -> {
 							</ee:message>
 						</ee:transform>
 						<salesforce-composite:execute-composite-graph doc:name="POST: DATA" doc:id="cb340847-28fe-4779-8896-2058d4fbfb79" config-ref="Salesforce_Composite_Config"/>
+						<ee:transform doc:name="Set Payload to JSON" doc:id="d8b8c337-25fd-4eba-b705-c1f351f206d0" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<logger level="INFO" doc:name="Log Payload" doc:id="06dea206-1507-43ba-9267-fc081caed2d2" message="payload"/>
+					</batch:aggregator>
+				</batch:step>
+				<batch:step name="Batch_Step2" doc:id="1d95665f-5076-4802-9539-dd3757563e7f" acceptExpression='#[if (vars.status == "exsists") true else false]' >
+					<batch:aggregator doc:name="Batch Aggregator PATCH" doc:id="81d715ea-ea24-40b1-b787-44534da815e1" size="75" preserveMimeTypes="true" >
+						<ee:transform doc:name="PATCH: Composite Graph Payload" doc:id="18b49594-e746-468c-a3b1-07af0c37528f" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere" 
+---
+payload map (value, index) -> {
+	"graphId": index +1,
+	"compositeRequest": [
+		{
+			"url": "/services/data/v50.0/sobjects/Account/Business_Partner_id__c/"++ payload[index].Partner.BusinessPartner,
+			"body": {
+			    //"Business_Partner_id__c": payload[index].Partner.BusinessPartner,
+			    "Name": if(!isEmpty(payload[index].Partner.FirstName) and !isEmpty(payload[index].Partner.LastName)) payload[index].Partner.FirstName ++ " " ++ payload[index].Partner.LastName else "Unknown",
+			    "Industry": if(payload[index].Partner.Industry == "Ba") "Banking"
+			     			else if (payload[index].Partner.Industry == "En") "Energy"
+			     			else if (payload[index].Partner.Industry == "Fi") "Finance"
+			     			else if (payload[index].Partner.Industry == "He") "Healthcare"
+			     			else if (payload[index].Partner.Industry == "Re") "Retail"
+			     			else "Other",
+			    //"Type": if(!isEmpty(payload[index].Partner.BusinessPartnerType)) payload[index].Partner.BusinessPartnerType else "Other",
+			    //"Country__c": payload[index].Partner.NameCountry,
+			    "Last_Name__c": payload[index].Partner.LastName,
+			    //"DOB__c": payload[index].Partner.BirthDate,
+			    //"Contact_Language__c": if(!isEmpty(payload[index].Partner.CorrespondenceLanguage)) payload[index].Partner.CorrespondenceLanguage else "English",
+			    "Blocked__c": payload[index].Partner.BusinessPartnerIsBlocked,
+			    //"Language__c": payload[index].Partner.Language,
+			    "Supplier__c": payload[index].Partner.Supplier,
+			    "Identity_Number__c": payload[index].Partner.PersonNumber,
+			    "Gender__c": if(payload[index].Partner.IsNaturalPerson == "X") 
+			    					if (payload[index].Partner.IsMale == true) "Male" 
+			    					else if (payload[index].Partner.IsFemale == true) "Female" 
+			    					else "Unknown" 
+			    			else "Organization",
+			    "First_Name__c": payload[index].Partner.FirstName,
+			    "integration__C": "yes"
+			},
+			"method": "PATCH",
+			"referenceId": "REF" ++ index ++ "account"
+		},
+		if(!isEmpty(payload[index].ContactId))
+		{
+			"url": "/services/data/v50.0/sobjects/Contact/" ++ payload[index].ContactId,
+			"body": {
+				"Street__c": payload[index].Address.StreetName,
+				"House_Number__c": payload[index].Address.HouseNumber,
+				//"Business_Partner_id__c": payload[index].Address.BusinessPartner,
+				"Postal_Code__c": payload[index].Address.PostalCode,
+				//"Languages__c": payload[index].Address.Language,
+				//"Time_Zone__c": payload[index].Address.AddressTimeZone,
+				"City__c": payload[index].Address.CityName,
+				"Country__c": payload[index].Address.Country,
+				//"Business_Partner_Address_id__c": payload[index].Address.AddressID,
+				"LastName": if(!isEmpty(payload[index].Partner.FirstName) and !isEmpty(payload[index].Partner.LastName)) payload[index].Partner.FirstName ++ " " ++ payload[index].Partner.LastName else "Unknown"
+				//"integration__C": "yes"
+				} ++
+			("AccountID": "@{" ++ "REF" ++ index ++ "account" ++ ".id}"),
+			"method": "PATCH",
+			"referenceId": "REF" ++ index ++ "contact"
+		} else
+				{
+			"url": "/services/data/v50.0/sobjects/Contact/" ++ "0037Q000008laoKQAQ",
+			"body": {
+				"Street__c": payload[index].Address.StreetName,
+				"House_Number__c": payload[index].Address.HouseNumber,
+				//"Business_Partner_id__c": payload[index].Address.BusinessPartner,
+				"Postal_Code__c": payload[index].Address.PostalCode,
+				//"Languages__c": payload[index].Address.Language,
+				//"Time_Zone__c": payload[index].Address.AddressTimeZone,
+				"City__c": payload[index].Address.CityName,
+				"Country__c": payload[index].Address.Country,
+				//"Business_Partner_Address_id__c": payload[index].Address.AddressID,
+				"LastName": if(!isEmpty(payload[index].Partner.FirstName) and !isEmpty(payload[index].Partner.LastName)) payload[index].Partner.FirstName ++ " " ++ payload[index].Partner.LastName else "Unknown"
+				//"integration__C": "yes"
+				} ++
+			("AccountID": "@{" ++ "REF" ++ index ++ "account" ++ ".id}"),
+			"method": "PATCH",
+			"referenceId": "REF" ++ index ++ "contact"
+		}  
+		
+	]
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<salesforce-composite:execute-composite-graph doc:name="PATCH: DATA" doc:id="20c6504f-3656-4106-a614-547a503f6e34" config-ref="Salesforce_Composite_Config" />
+						<ee:transform doc:name="Set Payload to JSON" doc:id="506d6944-3857-4b02-bdf7-cb69a0e4c99d" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<logger level="INFO" doc:name="Log Payload" doc:id="60b77604-22e5-4785-9033-38474c328e6b" message="payload" />
 					</batch:aggregator>
 				</batch:step>
 			</batch:process-records>

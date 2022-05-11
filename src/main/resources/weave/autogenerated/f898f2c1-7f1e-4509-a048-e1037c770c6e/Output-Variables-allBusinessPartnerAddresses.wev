@@ -1,0 +1,4 @@
+%dw 2.0
+
+type auto_f898f2c1_7f1e_4509_a048_e1037c770c6e_Output_Variables_allBusinessPartnerAddresses = Any
+

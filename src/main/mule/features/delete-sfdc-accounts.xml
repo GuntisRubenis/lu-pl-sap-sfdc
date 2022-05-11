@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd">
+	<http:listener-config name="HTTP_Local" doc:name="HTTP Listener config" doc:id="8b10aea5-bbdd-4c8d-9384-8e0b91acc858" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce Config" doc:id="c2a51002-30ab-4a64-aaec-ce9ceb74c22f" >
+		<salesforce:basic-connection username="${salesforce.username}" password="${salesforce.password}" securityToken="${salesforce.token}" />
+	</salesforce:sfdc-config>
+	<flow name="delete-sfdc-accountsFlow" doc:id="8dedbd17-8c9c-41a2-841f-f9c817666371" >
+		<http:listener doc:name="Listener" doc:id="5b751a6d-44a5-4c48-a1e3-fa0f20fa0d4a" config-ref="HTTP_Local" path="/delete"/>
+		<http:request method="GET" doc:name="GET ALL SFDC Accounts" doc:id="1ddebe71-e95c-44d6-ba14-2159d1803bdc" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/getAllAccounts" />
+		<ee:transform doc:name="Transform Message" doc:id="583e84bb-5ab4-4e5b-838e-bb50e62d6fab">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var array = payload filter (item, index) -> (!isEmpty(item.Business_Partner_id__c))
+---
+array.Id]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<salesforce:delete doc:name="Delete" doc:id="b9eb45fb-73df-4c6d-b738-dc9fec223437" config-ref="Salesforce_Config"/>
+		<ee:transform doc:name="Transform Message" doc:id="6a57b64b-ab73-44dc-94bf-1bf76c7acdfd" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="62e33378-0309-4a78-85c8-71eb3c1aa8ec" message="payload"/>
+	</flow>
+</mule>
