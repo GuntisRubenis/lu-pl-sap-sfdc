@@ -14,6 +14,6 @@
         <apikit:router config-ref="lu-sl-sap-sfdc-config" />
     </flow>
     <flow name="get:\startSyncProcess:lu-sl-sap-sfdc-config">
-		<flow-ref doc:name="sinchronize-dataFlow" doc:id="9dc85431-8ecd-4f75-8e30-16df86fe2c9c" name="sinchronize-dataFlow"/>
+		<flow-ref doc:name="sfdc-sap-flow" doc:id="9dc85431-8ecd-4f75-8e30-16df86fe2c9c" name="sfdc-sap-flow"/>
     </flow>
 </mule>

@@ -1,16 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<mule xmlns:salesforce-composite="http://www.mulesoft.org/schema/mule/salesforce-composite" xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
-	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
-	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+<mule xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:salesforce-composite="http://www.mulesoft.org/schema/mule/salesforce-composite"
+	xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
 http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
 http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
 http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
-http://www.mulesoft.org/schema/mule/salesforce-composite http://www.mulesoft.org/schema/mule/salesforce-composite/current/mule-salesforce-composite.xsd">
+http://www.mulesoft.org/schema/mule/salesforce-composite http://www.mulesoft.org/schema/mule/salesforce-composite/current/mule-salesforce-composite.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd">
 	<salesforce-composite:composite-config name="Salesforce_Composite_Config" doc:name="Salesforce Composite Config" doc:id="695d33fd-9e1b-421c-863a-af80eb592bc7" >
 		<salesforce-composite:oauth-user-pass-connection consumerKey="${salesforce.consumerkey}" consumerSecret="${salesforce.consumersecret}" username="${salesforce.username}" password="${salesforce.password}" securityToken="${salesforce.token}" />
 	</salesforce-composite:composite-config>
-	<sub-flow name="sap-sfdc-migration-subflow" doc:id="f898f2c1-7f1e-4509-a048-e1037c770c6e" >
+	<vm:config name="VM_Config" doc:name="VM Config" doc:id="392d8c9c-94d3-4f57-a1bd-bdbbf88180ff" sendCorrelationId="NEVER" >
+		<vm:queues >
+			<vm:queue queueName="response_queue" />
+		</vm:queues>
+	</vm:config>
+	<sub-flow name="sap-sfdc-flow" doc:id="f898f2c1-7f1e-4509-a048-e1037c770c6e" >
 		<http:request method="GET" doc:name="Get ALL Business Partners from SAP System API" doc:id="94c4402d-895a-4650-b9de-82501e7e55a9" config-ref="HTTP_Request_configuration_SAP_System_API" path="/getAllBusinessPartners"/>
 		<set-variable value="#[payload]" doc:name="allBusinessPartners" doc:id="97a8a035-db78-481e-8949-acd9a3d31174" variableName="allBusinessPartners"/>
 		<http:request method="GET" doc:name="Get ALL Business Partner Addresses from SAP System API" doc:id="53bb1d04-807d-45e5-8719-79dc42927e25" path="/getAllBusinessPartnerAddresses" config-ref="HTTP_Request_configuration_SAP_System_API"/>
@@ -30,9 +36,10 @@ vars.allBusinessPartners map (value, index) -> {
 		</ee:transform>
 		<http:request method="GET" doc:name="GET ALL Accounts from SFDC Sytem API" doc:id="6c798aaa-57f1-4ab4-ba70-92abb2c33830" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/getAllAccounts" />
 		<set-variable value="#[payload]" doc:name="sfdcAccounts" doc:id="2710f4e0-10ad-420a-b3b5-d1fc46a276a0" variableName="sfdcAccounts"/>
-		<flow-ref doc:name="migration-sub-flow" doc:id="de95c99f-3704-4cf1-bb3e-636892955c39" name="migration-sub-flow"/>
+		<flow-ref doc:name="sap-sfdc-subflow" doc:id="de95c99f-3704-4cf1-bb3e-636892955c39" name="sap-sfdc-subflow"/>
+		<vm:consume queueName="response_queue" doc:name="Consume" doc:id="631ed0d2-80e7-4495-b6c4-32e72d20e46a" config-ref="VM_Config" timeout="10" timeoutUnit="MINUTES"/>
 	</sub-flow>
-	<flow name="migration-sub-flow" doc:id="5e2f9317-6e2f-4009-9cdc-a0b6c6c96891" >
+	<flow name="sap-sfdc-subflow" doc:id="5e2f9317-6e2f-4009-9cdc-a0b6c6c96891" >
 		<ee:transform doc:name="Set payload to sapCombinedData" doc:id="2280df08-76ed-4486-87be-4db969033c06" >
 			<ee:message >
 				<ee:set-payload ><![CDATA[%dw 2.0
@@ -248,6 +255,17 @@ payload]]></ee:set-payload>
 					</batch:aggregator>
 				</batch:step>
 			</batch:process-records>
+			<batch:on-complete >
+				<ee:transform doc:name="Final Payload" doc:id="1d3ead6d-7ecc-48ce-9c41-3bba0fd23822" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<vm:publish doc:name="Publish" doc:id="c7e55a80-c828-44af-bf21-6d3f98cfbacd" config-ref="VM_Config" queueName="response_queue" timeout="10" timeoutUnit="MINUTES"/>
+			</batch:on-complete>
 		</batch:job>
 	</flow>
 </mule>

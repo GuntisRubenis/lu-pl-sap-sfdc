@@ -5,8 +5,7 @@
 	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
 http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
 http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
-	<flow name="sinchronize-dataFlow" doc:id="de5a888c-5f15-48be-a45a-e331998b28c8">
-		<http:listener doc:name="Listener" doc:id="91ef5c6d-b6d3-4a46-8567-562d04eae4de" config-ref="HTTP_Local" path="/sync"/>
+	<flow name="sfdc-sap-flow" doc:id="de5a888c-5f15-48be-a45a-e331998b28c8">
 		<http:request method="GET" doc:name="GET: SFDC All Accounts" doc:id="fbb97d70-9888-4847-94e2-a58456b6fc8a" config-ref="HTTP_Request_configuration_SFDC_System_API" path="/getAllAccounts" />
 		<ee:transform doc:name="sfdcAccounts" doc:id="3bff4315-55a9-47b4-ac01-563d4bf64cea" >
 			<ee:message >
@@ -16,14 +15,45 @@ http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/
 output application/json
 ---
 payload filter (item, index) -> (item.IsDeleted == "false" and !isEmpty(item.integration__c))]]></ee:set-variable>
+				<ee:set-variable variableName="sfdcDeletedAccounts" ><![CDATA[%dw 2.0
+output application/json
+---
+payload filter (item, index) -> (item.IsDeleted == "true" and !isEmpty(item.integration__c))]]></ee:set-variable>
 			</ee:variables>
 		</ee:transform>
 		<http:request method="GET" doc:name="GET: SAP Busineess Partners" doc:id="b87ad724-6ff7-4e58-b090-e006b2bab9c3" config-ref="HTTP_Request_configuration_SAP_System_API" path="/getAllBusinessPartners" />
 		<set-variable value="#[payload]" doc:name="businessPartners" doc:id="daff9fdf-3574-4c44-b92e-ad16df9a5397" variableName="businessPartners" />
-		<flow-ref doc:name="filter-accounts-sub-flow" doc:id="95be4bbc-ec5d-47fd-9858-a8b60368f8dd" name="filter-accounts-sub-flow" />
-		<flow-ref doc:name="sap-sfdc-migration-subflow" doc:id="ae738dcd-0b6d-43cc-b35c-b912b188ba84" name="sap-sfdc-migration-subflow"/>
+		<flow-ref doc:name="sfdc-sap-sub-flow" doc:id="95be4bbc-ec5d-47fd-9858-a8b60368f8dd" name="sfdc-sap-sub-flow" />
+		<flow-ref doc:name="sinchronize-data-delete-subflow" doc:id="d17e6303-de58-4e3d-af21-764695245120" name="sinchronize-data-delete-subflow" />
+		<flow-ref doc:name="sap-sfdc-flow" doc:id="ae738dcd-0b6d-43cc-b35c-b912b188ba84" name="sap-sfdc-flow"/>
 	</flow>
-	<sub-flow name="filter-accounts-sub-flow" doc:id="029b2d6c-8a16-4a2a-af2d-e40b6dbdb98c" >
+	<sub-flow name="sinchronize-data-delete-subflow" doc:id="87321c95-58f8-48b4-b2a9-c78076b0ea6a" >
+		<foreach doc:name="For Each" doc:id="66a8beb8-5dce-4d40-9a18-8819addc25eb" collection="#[vars.sfdcDeletedAccounts]">
+			<try doc:name="Try" doc:id="4bbc6338-7d5e-4a4f-bae1-cac817e78550" >
+				<ee:transform doc:name="GET Account Id" doc:id="4ebe3157-bb6d-43c6-9956-d02989cad3ef">
+				<ee:message>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="deletedAccountId"><![CDATA[%dw 2.0
+output application/json
+---
+payload.Business_Partner_id__c]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+				<http:request method="DELETE" doc:name="Delete: BusinessPartners in SAP" doc:id="d138abb7-0970-4066-b5fc-212e6c10e1f4" config-ref="HTTP_Request_configuration_SAP_System_API" path="/deleteBusinessPartner/{id}">
+				<http:uri-params><![CDATA[#[output application/java
+---
+{
+	"id" : vars.deletedAccountId
+}]]]></http:uri-params>
+			</http:request>
+				<error-handler >
+					<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="792d866b-9a92-4f65-9230-b5a8bb405b71" />
+				</error-handler>
+			</try>
+		</foreach>
+	</sub-flow>
+	<sub-flow name="sfdc-sap-sub-flow" doc:id="029b2d6c-8a16-4a2a-af2d-e40b6dbdb98c" >
 		<foreach doc:name="For Each SFDC Account" doc:id="1015c9ab-3cbc-41ee-aed5-0b2442c77880" collection="vars.sfdcAccounts" >
 			<set-variable value="#[payload]" doc:name="account" doc:id="1a824cef-c9f9-4091-834b-2e3aa27bb162" variableName="account"/>
 			<ee:transform doc:name="filterResult" doc:id="ec5d4914-ba15-4c92-98dc-bfb645e983ea" >
@@ -98,7 +128,7 @@ output application/json
         "PostalCode": vars.contact[0].Postal_Code__c default "",
         "CityName": vars.contact[0].City__c default "",
         "FullName": vars.contact[0].LastName default "",
-        "Country": vars.contact[0].Country__c default "",
+        "Country": vars.contact[0].Country__c[0 to 1] default "",
         "BusinessPartner": vars.contact[0].Business_Partner_id__c
   }]]></ee:set-payload>
 								</ee:message>
@@ -123,7 +153,7 @@ output application/json
         "PostalCode": vars.contact[0].Postal_Code__c default "",
         "CityName": vars.contact[0].City__c default "",
         "FullName": vars.contact[0].LastName default "",
-        "Country": vars.contact[0].Country__c default "",
+        "Country": vars.contact[0].Country__c[0 to 1] default "",
         "BusinessPartner": vars.account.Business_Partner_id__c
   }]]></ee:set-payload>
 								</ee:message>
